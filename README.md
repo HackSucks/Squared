@@ -37,8 +37,7 @@
 - syslinux
 ## Usage: Clone this repo:
 ```
-bash
-git clone https://github.com/CMPx1/Squared.git
+git clone https://github.com/HackSucks/Squared.git
 ```
 Then, create a workdir folder where the files are located (i recommend a seperate folder)
 then
@@ -50,6 +49,7 @@ or python3 init.py
 Any one of these will start Squared².
 Then once you are done with the chroot, press the unchroot button. if you get an error about pty not being found or similar, it is an issue with mounting and chrooting too many times, restart the PC and try again. once done with chrooting snd unchroot hsd been pressed, run sudo ./fixroot.sh from the main folder with all the scripts, and once its done, back in the GUI, select the OG Arch ISO, select the new airootfs.sfs, save it with <name>.iso, and repack it. And your ISO is ready!
 # Squared², because Arch users deserve a nice way to make their own ISO files!
+
 
 
 
