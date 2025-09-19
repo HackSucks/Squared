@@ -188,6 +188,30 @@ class MainApp(QMainWindow):
             subprocess.run(["sudo", "umount", "-l", temp_mount], check=True)
         subprocess.run(["sudo", "mount", "-o", "loop", original_iso, temp_mount], check=True)
 
+        # Get the original ISO label (VOLID)
+        try:
+            volid = subprocess.check_output(
+                ["blkid", "-o", "value", "-s", "LABEL", original_iso],
+                text=True
+            ).strip()
+            if not volid:
+                volid = "ARCH_202508"
+        except subprocess.CalledProcessError:
+            volid = "ARCH_202508"
+        self.console.append(f"[INFO] Using volume label: {volid}")
+
+        # Get the original ISO volume date
+        try:
+            volume_date = subprocess.check_output(
+                ["isoinfo", "-d", "-i", original_iso],
+                text=True
+            ).split("Volume_Creation_Date: ")[1].split("\n")[0].strip().replace("-", "").replace(":", "").replace(" ", "").replace(".", "")
+            self.console.append(f"[INFO] Original ISO volume date: {volume_date}")
+        except Exception as e:
+            self.console.append(f"[WARNING] Could not get original ISO volume date: {e}")
+            self.console.append("[WARNING] Using fallback volume date: 2025080113392600")
+            volume_date = "2025080113392600"
+
         # Copy ISO contents
         self.console.append("[INFO] Copying ISO contents ...")
         shutil.rmtree(temp_iso_dir)
@@ -204,19 +228,21 @@ class MainApp(QMainWindow):
         efi_boot_dir = os.path.join(temp_iso_dir, "EFI", "BOOT")
         if not os.path.isdir(efi_boot_dir):
             os.makedirs(efi_boot_dir, exist_ok=True)
-
         for f in os.listdir(efi_boot_dir):
             src = os.path.join(efi_boot_dir, f)
             dst = os.path.join(efi_boot_dir, f.upper())
             if src != dst:
                 os.rename(src, dst)
 
-        # Rebuild ISO
+        # Build the ISO using xorriso -as mkisofs
         if mode == "bios":
             self.console.append("[INFO] Building BIOS-only ISO ...")
-            subprocess.run([
+            xorriso_cmd = [
                 "xorriso", "-as", "mkisofs",
                 "-o", new_iso,
+                "-V", volid,
+                "-iso-level", "3",
+                "-full-iso9660-filenames",
                 "-b", "boot/syslinux/isolinux.bin",
                 "-c", "boot/syslinux/boot.cat",
                 "-no-emul-boot",
@@ -224,52 +250,29 @@ class MainApp(QMainWindow):
                 "-boot-info-table",
                 "-isohybrid-mbr", "/usr/lib/syslinux/bios/isohdpfx.bin",
                 temp_iso_dir
-            ], check=True)
-
+            ]
         elif mode == "uefi":
             self.console.append("[INFO] Building UEFI-only ISO ...")
-            
-            # Use grub-mkstandalone to create a reliable EFI bootloader
-            self.console.append("[INFO] Creating GRUB-based EFI bootloader...")
-            grub_efi_boot_dir = os.path.join(temp_iso_dir, "EFI", "BOOT")
-            grub_efi_file = os.path.join(grub_efi_boot_dir, "BOOTX64.EFI")
-            
-            # The grub.cfg must be present for grub-mkstandalone
-            grub_cfg_dir = os.path.join(temp_iso_dir, "boot", "grub")
-            if not os.path.isdir(grub_cfg_dir):
-                self.console.append("[ERROR] GRUB configuration directory not found. Exiting.")
-                return
-            
-            subprocess.run([
-                "grub-mkstandalone",
-                "-o", grub_efi_file,
-                "-O", "x86_64-efi",
-                "-d", "/usr/lib/grub/x86_64-efi",
-                "--modules=part_gpt part_msdos normal squash4",
-                f"{temp_iso_dir}/EFI/BOOT/grub.cfg={temp_iso_dir}/boot/grub/grub.cfg",
-                f"--fonts=/usr/share/grub/unicode.pf2={temp_iso_dir}/usr/share/grub/unicode.pf2",
-                f"{temp_iso_dir}/EFI/BOOT"
-            ], check=True)
-
-            # Build the ISO using the newly created EFI bootloader
-            self.console.append("[INFO] Building ISO with new EFI bootloader...")
-            subprocess.run([
-                 "xorriso", "-as", "mkisofs",
-                 "-iso-level", "3",
-                 "-full-iso9660-filenames",
-                 "-o", new_iso,
-                 "-eltorito-alt-boot",
-                 "-e", "EFI/BOOT/BOOTX64.EFI",
-                 "-no-emul-boot",
-                 "-isohybrid-gpt-basdat",
-                 temp_iso_dir
-            ], check=True)
-            
-        else:  # default hybrid
-            self.console.append("[INFO] Building BIOS+UEFI hybrid ISO ...")
-            subprocess.run([
+            xorriso_cmd = [
                 "xorriso", "-as", "mkisofs",
                 "-o", new_iso,
+                "-V", volid,
+                "-iso-level", "3",
+                "-full-iso9660-filenames",
+                "-eltorito-alt-boot",
+                "-e", "EFI/BOOT/BOOTX64.EFI",
+                "-no-emul-boot",
+                "-isohybrid-gpt-basdat",
+                temp_iso_dir
+            ]
+        else:  # hybrid
+            self.console.append("[INFO] Building BIOS+UEFI hybrid ISO ...")
+            xorriso_cmd = [
+                "xorriso", "-as", "mkisofs",
+                "-o", new_iso,
+                "-V", volid,
+                "-iso-level", "3",
+                "-full-iso9660-filenames",
                 "-b", "boot/syslinux/isolinux.bin",
                 "-c", "boot/syslinux/boot.cat",
                 "-no-emul-boot",
@@ -281,7 +284,9 @@ class MainApp(QMainWindow):
                 "-no-emul-boot",
                 "-isohybrid-gpt-basdat",
                 temp_iso_dir
-            ], check=True)
+            ]
+        self.console.append(f"[INFO] Running xorriso: {' '.join(xorriso_cmd)}")
+        subprocess.run(xorriso_cmd, check=True)
 
         # Unmount original ISO
         self.console.append("[INFO] Unmounting original ISO ...")
